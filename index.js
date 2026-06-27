@@ -5,13 +5,12 @@ const express = require("express");
 const app = express();
 app.use(express.json());
 
-// ── Config from environment variables ──
 const CLIENT_ID = process.env.YOUTUBE_CLIENT_ID;
 const CLIENT_SECRET = process.env.YOUTUBE_CLIENT_SECRET;
 const REFRESH_TOKEN = process.env.YOUTUBE_REFRESH_TOKEN;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const CHANNEL_ID = process.env.YOUTUBE_CHANNEL_ID;
-const CHECK_INTERVAL_MS = 60 * 60 * 1000; // every 1 hour
+const CHECK_INTERVAL_MS = 60 * 60 * 1000;
 
 const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
 
@@ -22,12 +21,10 @@ const youtube = google.youtube({ version: "v3", auth: oauth2Client });
 
 const PERSONA = `You are writing YouTube comment replies on behalf of the "Trump2028? Bible" channel (@Trump2028Bible). Channel identity: Biblical analysis of current political events — sharp, thought-provoking, faith-grounded. Tone: Samantha Bee meets deadpan news anchor — sharp, witty, dry sarcasm with warmth. Keep replies 1-3 sentences max. Acknowledge the commenter directly. Sprinkle biblical perspective naturally, never preachy. Use dry humor when appropriate. End with a question or engaging statement. Never use emojis unless the original comment had them. Never start with "Great comment!" or hollow affirmations. Match the energy of the comment.`;
 
-// Track which comments we've already replied to
 const repliedComments = new Set();
 
 async function getRecentComments() {
   try {
-    // Get recent videos first
     const videosRes = await youtube.search.list({
       part: "id",
       channelId: CHANNEL_ID,
@@ -39,7 +36,6 @@ async function getRecentComments() {
     const videoIds = videosRes.data.items.map((v) => v.id.videoId).filter(Boolean);
     if (!videoIds.length) return [];
 
-    // Get comments from those videos
     const allComments = [];
     for (const videoId of videoIds) {
       try {
@@ -50,11 +46,13 @@ async function getRecentComments() {
           order: "time",
         });
         const items = commentsRes.data.items || [];
-        // Only get top-level comments that have no replies yet
         const unanswered = items.filter((item) => {
+          const authorChannelId = item.snippet.topLevelComment.snippet.authorChannelId?.value;
+          const isOwnComment = authorChannelId === CHANNEL_ID;
           const hasReplies = item.snippet.totalReplyCount > 0;
           const alreadyReplied = repliedComments.has(item.id);
-          return !hasReplies && !alreadyReplied;
+          // Skip own channel comments (pinned comments etc) and already replied ones
+          return !isOwnComment && !hasReplies && !alreadyReplied;
         });
         allComments.push(...unanswered);
       } catch (e) {
@@ -98,7 +96,7 @@ async function postReply(parentId, text) {
 async function runBot() {
   console.log(`[${new Date().toISOString()}] Checking for new comments...`);
   const comments = await getRecentComments();
-  console.log(`Found ${comments.length} unanswered comments`);
+  console.log(`Found ${comments.length} unanswered comments from real viewers`);
 
   for (const thread of comments) {
     const snippet = thread.snippet.topLevelComment.snippet;
@@ -112,7 +110,6 @@ async function runBot() {
       await postReply(commentId, reply);
       repliedComments.add(thread.id);
       console.log(`✓ Posted reply: "${reply.substring(0, 50)}..."`);
-      // Wait 2 seconds between posts to avoid rate limits
       await new Promise((r) => setTimeout(r, 2000));
     } catch (e) {
       console.error(`Failed to reply to ${author}:`, e.message);
@@ -120,7 +117,6 @@ async function runBot() {
   }
 }
 
-// ── OAuth setup route — visit this once to get your refresh token ──
 app.get("/auth", (req, res) => {
   const url = oauth2Client.generateAuthUrl({
     access_type: "offline",
@@ -139,7 +135,6 @@ app.get("/oauth2callback", async (req, res) => {
     <p>Your refresh token is:</p>
     <pre style="background:#f0f0f0;padding:20px;word-break:break-all">${tokens.refresh_token}</pre>
     <p>Copy this and add it as the <strong>YOUTUBE_REFRESH_TOKEN</strong> environment variable in Render.com</p>
-    <p>Then redeploy your service and the bot will run automatically.</p>
   `);
 });
 
@@ -152,11 +147,9 @@ app.get("/run", async (req, res) => {
   res.send("Bot run complete — check logs for details.");
 });
 
-// Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-  // Run immediately on start, then every hour
   runBot();
   setInterval(runBot, CHECK_INTERVAL_MS);
 });
