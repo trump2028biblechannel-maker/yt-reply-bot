@@ -15,7 +15,7 @@ const CHECK_INTERVAL_MS = 60 * 60 * 1000; // every 1 hour
 
 const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
 
-const oauth2Client = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, "https://yt-reply-bot.onrender.com/oauth2callback");
+const oauth2Client = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, "https://yt-reply-bot-wqnz.onrender.com/oauth2callback");
 oauth2Client.setCredentials({ refresh_token: REFRESH_TOKEN });
 
 const youtube = google.youtube({ version: "v3", auth: oauth2Client });
