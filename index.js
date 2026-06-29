@@ -19,21 +19,36 @@ oauth2Client.setCredentials({ refresh_token: REFRESH_TOKEN });
 
 const youtube = google.youtube({ version: "v3", auth: oauth2Client });
 
-const PERSONA = `You are writing YouTube comment replies on behalf of the "Trump2028? Bible" channel (@Trump2028Bible). The channel is a BIBLICAL FACT-CHECKER — it challenges and debunks internet prophecy theories and lazy biblical interpretations. The host does NOT validate prophecy claims, numerology, or "signs" — she scrutinizes them with scripture and critical thinking. Tone: Samantha Bee meets deadpan news anchor — sharp, witty, dry sarcasm with warmth. CRITICAL RULES: Never validate prophecy claims, number patterns, or signs as real. Always gently push back on bad biblical interpretation using actual scripture. Keep replies 1-3 sentences max. Sound human and warm but intellectually sharp. Use dry humor to deflate inflated claims. End with a pointed question that makes the commenter think. Never use emojis unless the original comment had them. Never start with "Great comment!" or hollow affirmations.`;
+const PERSONA = `You are writing YouTube comment replies on behalf of the "Trump2028? Bible" channel (@Trump2028Bible). The channel is a BIBLICAL FACT-CHECKER that challenges and debunks prophecy claims, numerology, and lazy biblical interpretation using the full counsel of scripture. You have deep knowledge of the entire Bible and draw from any relevant passage to address the comment — not just one verse. Examples of relevant scripture by topic: For date-setting and signs: Matthew 24:36, Acts 1:7, Mark 13:32. For numerology and divination: Deuteronomy 18:10-12, Isaiah 8:19. For false prophets: Deuteronomy 18:20-22, Matthew 7:15-16, Jeremiah 23:16. For trusting your own interpretation: Proverbs 3:5-6, 2 Peter 1:20-21. For end times speculation: 2 Thessalonians 2:1-3, Revelation 22:18-19. Always pick the scripture that best fits the specific comment. Tone: Samantha Bee meets deadpan news anchor — sharp, witty, dry sarcasm with warmth. CRITICAL RULES: Never validate prophecy claims, number patterns, or signs. Always push back using the most relevant scripture for that specific comment. Keep replies 1-3 sentences max. Sound human and intellectually sharp. Use dry humor to deflate inflated claims. End with a pointed question that makes the commenter think. Never use emojis unless the original comment had them. Never start with Great comment or hollow affirmations.`;
 
 const repliedComments = new Set();
 
-async function getRecentComments() {
-  try {
-    const videosRes = await youtube.search.list({
+async function getAllVideoIds() {
+  const videoIds = [];
+  let pageToken = null;
+
+  do {
+    const params = {
       part: "id",
       channelId: CHANNEL_ID,
-      maxResults: 10,
-      order: "date",
+      maxResults: 50,
       type: "video",
-    });
+    };
+    if (pageToken) params.pageToken = pageToken;
 
-    const videoIds = videosRes.data.items.map((v) => v.id.videoId).filter(Boolean);
+    const res = await youtube.search.list(params);
+    const ids = (res.data.items || []).map((v) => v.id.videoId).filter(Boolean);
+    videoIds.push(...ids);
+    pageToken = res.data.nextPageToken || null;
+  } while (pageToken);
+
+  console.log(`Found ${videoIds.length} total videos on channel`);
+  return videoIds;
+}
+
+async function getRecentComments() {
+  try {
+    const videoIds = await getAllVideoIds();
     if (!videoIds.length) return [];
 
     const allComments = [];
@@ -42,7 +57,7 @@ async function getRecentComments() {
         const commentsRes = await youtube.commentThreads.list({
           part: "snippet",
           videoId,
-          maxResults: 20,
+          maxResults: 50,
           order: "time",
         });
         const items = commentsRes.data.items || [];
@@ -51,7 +66,6 @@ async function getRecentComments() {
           const isOwnComment = authorChannelId === CHANNEL_ID;
           const hasReplies = item.snippet.totalReplyCount > 0;
           const alreadyReplied = repliedComments.has(item.id);
-          // Skip own channel comments (pinned comments etc) and already replied ones
           return !isOwnComment && !hasReplies && !alreadyReplied;
         });
         allComments.push(...unanswered);
@@ -94,7 +108,7 @@ async function postReply(parentId, text) {
 }
 
 async function runBot() {
-  console.log(`[${new Date().toISOString()}] Checking for new comments...`);
+  console.log(`[${new Date().toISOString()}] Checking for new comments across all videos...`);
   const comments = await getRecentComments();
   console.log(`Found ${comments.length} unanswered comments from real viewers`);
 
@@ -109,7 +123,7 @@ async function runBot() {
       const reply = await generateReply(text, author);
       await postReply(commentId, reply);
       repliedComments.add(thread.id);
-      console.log(`✓ Posted reply: "${reply.substring(0, 50)}..."`);
+      console.log(`✓ Posted: "${reply.substring(0, 50)}..."`);
       await new Promise((r) => setTimeout(r, 2000));
     } catch (e) {
       console.error(`Failed to reply to ${author}:`, e.message);
@@ -139,7 +153,7 @@ app.get("/oauth2callback", async (req, res) => {
 });
 
 app.get("/", (req, res) => {
-  res.send("Trump2028? Bible Comment Bot is running. Visit /auth to authorize YouTube access.");
+  res.send("Trump2028? Bible Comment Bot is running.");
 });
 
 app.get("/run", async (req, res) => {
